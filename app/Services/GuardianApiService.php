@@ -2,78 +2,36 @@
 
 namespace App\Services;
 
-use Carbon\Carbon;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Http\Client\Response;
 
-class GuardianApiService implements APIServiceInterface
+class GuardianApiService extends BaseApiService
 {
-    protected $apiKey;
-    protected $baseUrl;
-    protected $params;
 
-    public function __construct(array $params = [])
+    protected function getApiKeyConfigKey(): string
     {
-        $this->apiKey = config('services.guardian.key');
-        $this->baseUrl = 'https://content.guardianapis.com';
-        $this->params = $params;
+        return 'services.guardian.key';
     }
 
-    /**
-     * Fetch everything from the News API.
-     *
-     * @param array $params
-     * @return array
-     */
-    public function getEverything(array $params = []): array
+    protected function getBaseUrl(): string
     {
-        $date = Carbon::now();
-        $params['from-date'] = $date->format('Y-m-d');
-        $params['to-date'] = $date->format('Y-m-d');
-        $data = $this->makeRequest('/search', $params);
-        while(empty($data)) {
-            Log::info('Fetching articles from Guardian API in '.$params['from-date']);
-            $date->subDay();
-            $params['from-date'] = $date->format('Y-m-d');
-            $params['to-date'] = $date->format('Y-m-d');
-            $data = $this->makeRequest('/search', $params);
-        }
-        return $data;
+        return 'https://content.guardianapis.com';
     }
 
-    /**
-     * Make a request to the News API.
-     *
-     * @param string $endpoint
-     * @param array $params
-     * @return array
-     */
-    public function makeRequest(string $endpoint, array $params = []): array
+    protected function getSearchEndpoint(): string
     {
-        $allParams = array_merge([
-            'api-key' => $this->apiKey,
-            'show-fields' => 'all',
-        ], $this->params, $params);
-
-        $response = Http::baseUrl($this->baseUrl)->get($endpoint, $allParams);
-        if ($response->failed() || $response->json()['response']['status'] == 'error') {
-            Log::error('News API request failed', [
-                'status' => $response->status(),
-                'response' => $response->body(),
-            ]);
-            return [];
-        }
-
-
-        return $this->toLocalDBSchema($response->json());
+        return '/search';
     }
 
-    /**
-     * Transform data from News API schema to local DB schema.
-     *
-     * @param array $data
-     * @return array
-     */
+    protected function getAdditionalRequestParams(): array
+    {
+        return ['show-fields' => 'all'];
+    }
+
+    protected function isRequestFailed(Response $response): bool
+    {
+        return $response->failed() || $response->json()['response']['status'] === 'error';
+    }
+
     public function toLocalDBSchema(array $data): array
     {
         $transformedData = [];
@@ -82,11 +40,11 @@ class GuardianApiService implements APIServiceInterface
                 'title' => $article['webTitle'],
                 'slug' => $article['id'],
                 'url' => $article['webUrl'],
-                'description' => $article['fields']['trailText'],
-                'author' => $article['fields']['byline'],
-                'image_url' => $article['fields']['thumbnail'],
+                'description' => $article['fields']['trailText'] ?? '',
+                'author' => $article['fields']['byline'] ?? '',
+                'image_url' => $article['fields']['thumbnail'] ?? '',
                 'published_at' => $article['webPublicationDate'],
-                'content' => $article['fields']['body'],
+                'content' => $article['fields']['body'] ?? '',
                 'source' => $article['sectionId'],
                 'original_source' => 'The Guardian',
             ];
@@ -95,3 +53,4 @@ class GuardianApiService implements APIServiceInterface
         return $transformedData;
     }
 }
+

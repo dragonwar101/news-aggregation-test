@@ -2,66 +2,50 @@
 
 namespace App\Services;
 
-use Carbon\Carbon;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Str;
 
-class NYTApiService implements APIServiceInterface
+class NYTApiService extends BaseApiService
 {
-    protected $apiKey;
-    protected $baseUrl;
-    protected $params;
 
-    public function __construct(array $params = [])
+    protected function getApiKeyConfigKey(): string
     {
-        $this->apiKey = config('services.newyorktimes.key');
-        $this->baseUrl = 'https://api.nytimes.com/svc/search/v2';
-        $this->params = $params;
+        return 'services.newyorktimes.key';
     }
 
-    public function getEverything(array $params = []) : array
+    protected function getBaseUrl(): string
     {
-        $date = Carbon::now();
-        $params['from-date'] = $date->format('Y-m-d');
-        $params['to-date'] = $date->format('Y-m-d');
-        $data = $this->makeRequest('/articlesearch.json', $params);
-        while(empty($data)) {
-            Log::info('Fetching articles from NYT API in '.$params['from-date']);
-            $date->subDay();
-            $params['from-date'] = $date->format('Y-m-d');
-            $params['to-date'] = $date->format('Y-m-d');
-            $data = $this->makeRequest('/articlesearch.json', $params);
-        }
-        return $data;
+        return 'https://api.nytimes.com/svc/search/v2';
     }
 
-    public function makeRequest(string $endpoint, array $params = []) : array
+    protected function getSearchEndpoint(): string
     {
-        $allParams = array_merge([
-            'sort' => 'newest',
-            'api-key' => $this->apiKey,
-        ], $this->params, $params);
-        $response = Http::baseUrl($this->baseUrl)->get($endpoint, $allParams);
-        if ($response->failed()) {
-            dd($response->json());
-            Log::error('NYT API request failed', [
-                'status' => $response->status(),
-                'response' => $response->body(),
-            ]);
-
-            return [];
-        }
-
-        return $this->toLocalDBSchema($response->json());
+        return '/articlesearch.json';
     }
 
-    /**
-     * Transform data from News API schema to local DB schema.
-     *
-     * @param array $data
-     * @return array
-     */
+    protected function getDateParams(): array
+    {
+        return [
+            'from' => 'begin_date',
+            'to' => 'end_date',
+        ];
+    }
+
+    protected function getDateFormat(): string
+    {
+        return 'Ymd';
+    }
+
+    protected function getAdditionalRequestParams(): array
+    {
+        return ['sort' => 'newest'];
+    }
+
+    protected function isRequestFailed(Response $response): bool
+    {
+        return $response->failed() || !$response->json()['response'];
+    }
+
     public function toLocalDBSchema(array $data): array
     {
         $transformedData = [];
@@ -72,9 +56,9 @@ class NYTApiService implements APIServiceInterface
                 'url' => $article['web_url'],
                 'author' => $article['byline']['original'],
                 'description' => $article['abstract'],
-                'image_url' => $article['multimedia']['default']['url'],
+                'image_url' => $article['multimedia']['default']['url'] ?? '',
                 'published_at' => $article['pub_date'],
-                'content' => $article['multimedia']['caption'],
+                'content' => $article['multimedia']['caption'] ?? '',
                 'source' => $article['source'],
                 'original_source' => 'New York Times',
             ];
